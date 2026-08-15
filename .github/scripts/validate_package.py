@@ -64,6 +64,19 @@ def validate_vdf(data, binary_path, label):
         )
 
 
+def validate_cardinality(files, binary_path, vdf_path, label):
+    binaries = sorted(name for name in files if name.lower().endswith(".so"))
+    if len(binaries) != 1 or binaries[0] != binary_path:
+        raise ValidationError(
+            f"{label}: expected exactly one binary {binary_path!r}, found {binaries}"
+        )
+    vdfs = sorted(name for name in files if name.lower().endswith(".vdf"))
+    if len(vdfs) != 1 or vdfs[0] != vdf_path:
+        raise ValidationError(
+            f"{label}: expected exactly one VDF {vdf_path!r}, found {vdfs}"
+        )
+
+
 def validate_file_set(root, expected, binary_path, vdf_path):
     if not root.is_dir():
         raise ValidationError(f"package root does not exist: {root}")
@@ -77,6 +90,8 @@ def validate_file_set(root, expected, binary_path, vdf_path):
             continue
         if not path.is_file():
             raise ValidationError(f"special file is not allowed: {relative}")
+        if path.stat().st_nlink > 1:
+            raise ValidationError(f"hardlink is not allowed: {relative}")
         actual.add(relative)
 
     if actual != expected:
@@ -84,6 +99,7 @@ def validate_file_set(root, expected, binary_path, vdf_path):
         extra = sorted(actual - expected)
         raise ValidationError(f"package file set mismatch; missing={missing}, extra={extra}")
 
+    validate_cardinality(actual, binary_path, vdf_path, str(root))
     for relative in sorted(expected):
         path = root / Path(relative)
         if path.stat().st_size == 0:
@@ -107,21 +123,26 @@ def validate_archive(archive, archive_format, expected, binary_path, vdf_path):
                 bad = handle.testzip()
                 if bad is not None:
                     raise ValidationError(f"ZIP CRC check failed for {bad}")
+                seen_names = set()
                 for info in handle.infolist():
                     name = normalize_path(info.filename)
+                    if name in seen_names:
+                        raise ValidationError(f"duplicate ZIP member is not allowed: {name}")
+                    seen_names.add(name)
                     if info.is_dir():
                         if name not in allowed_dirs:
                             raise ValidationError(f"unexpected ZIP directory: {name}")
                         continue
                     mode = (info.external_attr >> 16) & 0o170000
-                    if mode == stat.S_IFLNK:
-                        raise ValidationError(f"ZIP symlink is not allowed: {name}")
+                    if mode not in (0, stat.S_IFREG):
+                        raise ValidationError(f"ZIP special file is not allowed: {name}")
                     archive_files.add(name)
                 if archive_files != expected:
                     raise ValidationError(
                         f"ZIP file set mismatch; missing={sorted(expected - archive_files)}, "
                         f"extra={sorted(archive_files - expected)}"
                     )
+                validate_cardinality(archive_files, binary_path, vdf_path, f"{archive}:{archive_format}")
                 archive_data[binary_path] = handle.read(binary_path)
                 archive_data[vdf_path] = handle.read(vdf_path)
         except zipfile.BadZipFile as exc:
@@ -130,8 +151,12 @@ def validate_archive(archive, archive_format, expected, binary_path, vdf_path):
         try:
             with tarfile.open(archive, "r:gz") as handle:
                 members = handle.getmembers()
+                seen_names = set()
                 for member in members:
                     name = normalize_path(member.name)
+                    if name in seen_names:
+                        raise ValidationError(f"duplicate TAR member is not allowed: {name}")
+                    seen_names.add(name)
                     if member.isdir():
                         if name not in allowed_dirs:
                             raise ValidationError(f"unexpected TAR directory: {name}")
@@ -144,6 +169,7 @@ def validate_archive(archive, archive_format, expected, binary_path, vdf_path):
                         f"TAR file set mismatch; missing={sorted(expected - archive_files)}, "
                         f"extra={sorted(archive_files - expected)}"
                     )
+                validate_cardinality(archive_files, binary_path, vdf_path, f"{archive}:{archive_format}")
                 for member in members:
                     name = normalize_path(member.name)
                     if name in (binary_path, vdf_path):
