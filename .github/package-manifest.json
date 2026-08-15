@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "packages": {
+    "core": {
+      "files": [
+        "addons/configs/levels_ranks/settings.ini",
+        "addons/data/lr_data.ini",
+        "addons/levels_ranks/levels_ranks.so",
+        "addons/metamod/levels_ranks.vdf",
+        "addons/translations/lr_core.phrases.txt",
+        "addons/translations/lr_core_ranks.phrases.txt"
+      ],
+      "binary": "addons/levels_ranks/levels_ranks.so",
+      "vdf": "addons/metamod/levels_ranks.vdf"
+    }
+  }
+}

@@ -8,6 +8,31 @@ on:
   pull_request:
     branches:
       - main
+  verify-archive:
+    name: Verify archive
+    if: github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Download build artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: compile
+          path: release-files
+
+      - name: Validate archive
+        run: |
+          python3 .github/scripts/validate_package.py \
+            --manifest .github/package-manifest.json \
+            --package-key core \
+            --archive release-files/levels_ranks.zip \
+            --archive-format zip
+          zip -T release-files/*.zip
   release:
     types:
       - created
@@ -40,6 +65,9 @@ jobs:
 
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Verify LF line endings
+        run: python3 .github/scripts/check_line_endings.py
 
       - name: Set up dependencies
         run: |
@@ -164,27 +192,22 @@ jobs:
             --hl2sdk-root="$HL2SDK_ROOT"
           ambuild
 
-      - name: Validate and create archive
+      - name: Validate package and create archive
         run: |
-          test -d build/package/addons
-          expected_files="$(mktemp)"
-          actual_files="$(mktemp)"
-          cat > "$expected_files" <<'EOF'
-          configs/levels_ranks/settings.ini
-          data/lr_data.ini
-          levels_ranks/levels_ranks.so
-          metamod/levels_ranks.vdf
-          translations/lr_core.phrases.txt
-          translations/lr_core_ranks.phrases.txt
-          EOF
-          find build/package/addons -type f -printf '%P\n' | sort > "$actual_files"
-          diff -u "$expected_files" "$actual_files"
-          rm -f "$expected_files" "$actual_files"
+          python3 .github/scripts/validate_package.py \
+            --manifest .github/package-manifest.json \
+            --package-root build/package \
+            --package-key core
           cd build/package
           zip -r "$GITHUB_WORKSPACE/levels_ranks.zip" addons
           test -s "$GITHUB_WORKSPACE/levels_ranks.zip"
-          test "$(unzip -Z1 "$GITHUB_WORKSPACE/levels_ranks.zip" | head -n 1)" = "addons/"
           zip -T "$GITHUB_WORKSPACE/levels_ranks.zip"
+          python3 "$GITHUB_WORKSPACE/.github/scripts/validate_package.py" \
+            --manifest "$GITHUB_WORKSPACE/.github/package-manifest.json" \
+            --package-root "$GITHUB_WORKSPACE/build/package" \
+            --package-key core \
+            --archive "$GITHUB_WORKSPACE/levels_ranks.zip" \
+            --archive-format zip
           sha256sum "$GITHUB_WORKSPACE/levels_ranks.zip"
 
       - name: Upload archive to artifact
@@ -209,11 +232,21 @@ jobs:
           name: compile
           path: release-files
 
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.sha }}
+
       - name: Verify build artifact
         run: |
           test "$(find release-files -maxdepth 1 -type f -name '*.zip' | wc -l)" -eq 1
           test "$(find release-files -maxdepth 1 -type f -name 'BUILD_REPORT.md' | wc -l)" -eq 0
           ls -la release-files
+          python3 .github/scripts/validate_package.py \
+            --manifest .github/package-manifest.json \
+            --package-key core \
+            --archive release-files/levels_ranks.zip \
+            --archive-format zip
           zip -T release-files/*.zip
           sha256sum release-files/*.zip
 
