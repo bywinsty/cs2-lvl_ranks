@@ -62,7 +62,7 @@
 	{
 		"en"		"Admin's Panel"
 		"ru"		"Панель Администратора"
-		"ua"		"Панель Адміністратора"
+		"ua"		"Адмін-панель"
 		"chi"		"管理员菜单"
 		"es"		"Panel de admin"
 		"de"		"Admin Menü"
