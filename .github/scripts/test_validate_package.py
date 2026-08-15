@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import json
+import os
+import struct
 import sys
 import tarfile
 import tempfile
@@ -56,6 +58,32 @@ class PackageValidatorTests(unittest.TestCase):
         with self.assertRaises(validator.ValidationError):
             validator.validate_package(self.manifest, "test", self.root)
 
+    def test_hardlink_fails(self):
+        source = Path(self.temp.name) / "hardlink-source"
+        source.write_text("enabled = 1\\n", encoding="utf-8")
+        (self.root / self.config).unlink()
+        os.link(source, self.root / self.config)
+        with self.assertRaises(validator.ValidationError):
+            validator.validate_package(self.manifest, "test", self.root)
+
+    def test_multiple_binaries_fail(self):
+        extra = self.root / "addons/vip_modules/extra.so"
+        extra.write_bytes((self.root / self.binary).read_bytes())
+        manifest = json.loads(self.manifest.read_text(encoding="utf-8"))
+        manifest["packages"]["test"]["files"].append(extra.relative_to(self.root).as_posix())
+        self.manifest.write_text(json.dumps(manifest), encoding="utf-8")
+        with self.assertRaises(validator.ValidationError):
+            validator.validate_package(self.manifest, "test", self.root)
+
+    def test_multiple_vdfs_fail(self):
+        extra = self.root / "addons/metamod/extra.vdf"
+        extra.write_text('"file" "addons/vip_modules/test"\\n', encoding="utf-8")
+        manifest = json.loads(self.manifest.read_text(encoding="utf-8"))
+        manifest["packages"]["test"]["files"].append(extra.relative_to(self.root).as_posix())
+        self.manifest.write_text(json.dumps(manifest), encoding="utf-8")
+        with self.assertRaises(validator.ValidationError):
+            validator.validate_package(self.manifest, "test", self.root)
+
     def test_bad_vdf_and_bad_elf_fail(self):
         (self.root / self.vdf).write_text('"file" "addons/wrong"\n', encoding="utf-8")
         with self.assertRaises(validator.ValidationError):
@@ -88,6 +116,21 @@ class PackageValidatorTests(unittest.TestCase):
         validator.validate_package(
             self.manifest, "test", archive=tar_path, archive_format="tar.gz"
         )
+
+    def test_zip_crc_failure(self):
+        zip_path = Path(self.temp.name) / "crc.zip"
+        self._write_zip(zip_path)
+        data = bytearray(zip_path.read_bytes())
+        local_header = data.find(b"PK\\x03\\x04")
+        self.assertGreaterEqual(local_header, 0)
+        name_length, extra_length = struct.unpack_from("<HH", data, local_header + 26)
+        payload = local_header + 30 + name_length + extra_length
+        data[payload] ^= 0xFF
+        zip_path.write_bytes(data)
+        with self.assertRaises(validator.ValidationError):
+            validator.validate_package(
+                self.manifest, "test", archive=zip_path, archive_format="zip"
+            )
 
     def test_invalid_archives_fail(self):
         invalid_zip = Path(self.temp.name) / "invalid.zip"
