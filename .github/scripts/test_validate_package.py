@@ -121,7 +121,7 @@ class PackageValidatorTests(unittest.TestCase):
         zip_path = Path(self.temp.name) / "crc.zip"
         self._write_zip(zip_path)
         data = bytearray(zip_path.read_bytes())
-        local_header = data.find(b"PK\\x03\\x04")
+        local_header = data.find(b"PK\x03\x04")
         self.assertGreaterEqual(local_header, 0)
         name_length, extra_length = struct.unpack_from("<HH", data, local_header + 26)
         payload = local_header + 30 + name_length + extra_length
